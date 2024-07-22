@@ -54,8 +54,7 @@ function fatal() {
 ##
 ## Get a domain name
 ##
-
-rootDomain=$(gum input --placeholder="Enter the root domain name")
+rootDomain=$(gum input  --header="Enter the root domain name" --placeholder="example.comn")
 
 if [[ -z "$rootDomain" ]]; then
   gum style "No domain entered, exiting deployment"
@@ -68,7 +67,7 @@ c2="Domain: docs.$rootDomain"
 width=$(( ${#c1} > ${#c2} ? ${#c1} : ${#c2}))
 width=$(($width+8))
 
-gum style --border double \
+gum style  --foreground="" --border double \
 --align left --width $width --margin "1 1" --padding "1 1" "${c1}" "${c2}"
 
 ready=$(gum confirm --selected.background=$dark)
@@ -112,6 +111,6 @@ aws iam create-access-key --user-name DocsBuilder --query "[['AWS_ACCESS_KEY_ID'
 echo
 echo
 
-gum style --forground="$green" "🟢 Success"
+gum style --foreground="$green" "🟢 Success"
 exit 0
 
