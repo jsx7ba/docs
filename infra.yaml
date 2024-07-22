@@ -1,0 +1,123 @@
+## 
+## Set up infrastructure for hosting html documentation.
+##
+
+AWSTemplateFormatVersion: 2010-09-09
+Parameters:
+  DomainName:
+    Type: String
+
+  RootDomainZoneId:
+    Type: String
+
+# Magic values for S3 DNS.
+# See https://docs.aws.amazon.com/general/latest/gr/s3.html#s3_website_region_endpoints
+  S3Domain:
+    Type: String
+    Default: s3-website-us-east-1.amazonaws.com
+
+  S3HostedZoneId:
+    Type: String
+    Default: Z3AQBSTGFYJSTF
+
+Resources:
+  # The domain the bucket will be accessed at.  Cannot be a root domain.
+  Domain:
+    Type: AWS::Route53::RecordSet
+    Properties:
+      Name: !Ref DomainName
+      Type: CNAME
+      HostedZoneId: !Ref RootDomainZoneId
+      AliasTarget:
+        DNSName: !Ref S3Domain 
+        HostedZoneId: !Ref S3HostedZoneId
+
+  # The S3 bucket storing documentation *available to the public*.
+  Bucket:
+    Type: AWS::S3::Bucket
+    Properties:
+      BucketName: !Ref DomainName
+      PublicAccessBlockConfiguration:
+        BlockPublicAcls: false
+        BlockPublicPolicy: false
+        IgnorePublicAcls: false
+        RestrictPublicBuckets: false
+      WebsiteConfiguration:
+        IndexDocument: index.html
+      OwnershipControls:
+        Rules:
+          - ObjectOwnership: BucketOwnerEnforced
+
+  # Define who's allowed to read objects in the bucket      
+  BucketPolicy:
+    Type: AWS::S3::BucketPolicy
+    Properties:
+      Bucket: !Ref DomainName
+      PolicyDocument:
+        Version: 2012-10-17
+        Statement: 
+          Sid: PublicReadGetObject
+          Effect: Allow
+          Principal: "*"
+          Action: s3:GetObject
+          Resource: !Sub "arn:aws:s3:::${DomainName}/*"
+
+  # Create a user who's access keys can be used to update the site contents.
+  DocsBuilder:
+    Type: AWS::IAM::User
+    Properties:
+      UserName: DocsBuilder
+      Policies: 
+        - PolicyName: DocsBuilderPolicy
+          PolicyDocument:
+            Version: 2012-10-17
+            Statement:
+              - Sid: S3Bucket 
+                Effect: Allow
+                Action: 
+                  - s3:PutObject
+                  - s3:DeleteObject
+                  - s3:ListBucket
+                Resource: !Sub "arn:aws:s3:::${DomainName}"
+              - Sid: S3BucketObjects
+                Effect: Allow
+                Action: 
+                  - s3:*
+                Resource: !Sub "arn:aws:s3:::${DomainName}/*"
+
+  # The TLS certificate to use when viewing the documentation.
+  Certificate:
+    Type: AWS::CertificateManager::Certificate
+    Properties:
+      DomainName: !Ref DomainName
+      DomainValidationOptions: 
+        - DomainName: !Ref DomainName
+          HostedZoneId: !Ref RootDomainZoneId
+      KeyAlgorithm: RSA_2048
+      ValidationMethod: DNS
+
+  # Create a cloud front distribution which caches the contents of the s3 bucket in different regions.
+  # It also enables access with https
+  CFDistribution:
+    Type: AWS::CloudFront::Distribution
+    Properties:
+      DistributionConfig:
+        DefaultRootObject: index.html # Leaving this property empty causes 403 errors
+        Enabled: true
+        DefaultCacheBehavior:
+          CachePolicyId: 658327ea-f89d-4fab-a63d-7e88639e58f6 # see https://docs.aws.amazon.com/AmazonCloudFront/latest/DeveloperGuide/using-managed-cache-policies.html
+          ViewerProtocolPolicy: redirect-to-https
+          TargetOriginId: docs-origin
+        PriceClass: PriceClass_All # PriceClass_100 | PriceClass_200 | PriceClass_All
+        Origins:
+          - Id: docs-origin
+            DomainName: !Sub "${DomainName}.s3-website-us-east-1.amazonaws.com"
+            CustomOriginConfig:
+              OriginProtocolPolicy: http-only
+        CNAMEs: 
+          - !Ref DomainName  
+        ViewerCertificate:
+          AcmCertificateArn: !Ref Certificate
+          MinimumProtocolVersion: TLSv1.2_2021
+          SslSupportMethod: sni-only
+
